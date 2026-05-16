@@ -11,20 +11,21 @@ import requests
 
 LOOKBACK_MINUTES = 5
 
-# LOWERED FOR REALISTIC BTC 5M CONDITIONS
+# RELAXED THRESHOLDS
 MIN_MOMENTUM_PCT = 0.12
-
-# LOWERED TO ALLOW MORE VALID MARKETS
 MIN_VOLUME_RATIO = 0.25
 
-ENTRY_THRESHOLD = 0.05
+# DYNAMIC FAIR VALUE MULTIPLIER
+MOMENTUM_FACTOR = 0.80
+
+# MINIMUM EDGE REQUIRED
+MIN_DIVERGENCE_EDGE = 0.03
 
 TRADE_WINDOW_SECONDS = 10
 
 FEE_RATE = 0.10
 
 SIGNALS_CSV = "signals.csv"
-
 MARKET_CSV = "market_data.csv"
 
 # =====================================================
@@ -50,6 +51,7 @@ def setup_csv():
                 "btc_then",
                 "momentum_pct",
                 "volume_ratio",
+                "expected_yes_price",
                 "yes_price",
                 "no_price",
                 "divergence",
@@ -76,6 +78,7 @@ def setup_csv():
                 "btc_now",
                 "momentum_pct",
                 "volume_ratio",
+                "expected_yes_price",
                 "yes_price",
                 "no_price",
                 "divergence",
@@ -249,30 +252,45 @@ def analyze_signal(
         momentum["momentum_pct"]
     )
 
+    # =============================================
+    # MOMENTUM FILTER
+    # =============================================
+
     if momentum_pct < MIN_MOMENTUM_PCT:
 
-        return None, "weak momentum"
+        return None, "weak momentum", 0
+
+    # =============================================
+    # VOLUME FILTER
+    # =============================================
 
     if (
         momentum["volume_ratio"]
         < MIN_VOLUME_RATIO
     ):
 
-        return None, "low volume"
+        return None, "low volume", 0
 
     yes_price = market["yes_price"]
 
-    # ============================================
-    # DIRECTION
-    # ============================================
+    # =============================================
+    # DYNAMIC FAIR VALUE MODEL
+    # =============================================
 
     if momentum["direction"] == "up":
 
         signal = "BUY_YES"
 
-        divergence = (
+        expected_yes_price = (
             0.50
-            + ENTRY_THRESHOLD
+            + (
+                momentum_pct
+                * MOMENTUM_FACTOR
+            )
+        )
+
+        divergence = (
+            expected_yes_price
             - yes_price
         )
 
@@ -280,25 +298,34 @@ def analyze_signal(
 
         signal = "BUY_NO"
 
-        divergence = (
-            yes_price
+        expected_yes_price = (
+            0.50
             - (
-                0.50
-                - ENTRY_THRESHOLD
+                momentum_pct
+                * MOMENTUM_FACTOR
             )
         )
 
-    # ============================================
-    # MARKET ALREADY PRICED IN
-    # ============================================
+        divergence = (
+            yes_price
+            - expected_yes_price
+        )
 
-    if divergence <= 0:
+    # =============================================
+    # EDGE FILTER
+    # =============================================
 
-        return None, "priced in"
+    if divergence < MIN_DIVERGENCE_EDGE:
 
-    # ============================================
+        return (
+            None,
+            "no edge",
+            divergence
+        )
+
+    # =============================================
     # FEE FILTER
-    # ============================================
+    # =============================================
 
     buy_price = (
         yes_price
@@ -323,15 +350,19 @@ def analyze_signal(
         breakeven - 0.50
     )
 
-    min_divergence = (
-        fee_penalty + 0.02
+    if divergence < fee_penalty:
+
+        return (
+            None,
+            "fees eat edge",
+            divergence
+        )
+
+    return (
+        signal,
+        expected_yes_price,
+        divergence
     )
-
-    if divergence < min_divergence:
-
-        return None, "fees eat edge"
-
-    return signal, divergence
 
 # =====================================================
 # LOG MARKET
@@ -340,6 +371,7 @@ def analyze_signal(
 def log_market(
     market,
     momentum,
+    expected_yes_price,
     divergence,
     time_left
 ):
@@ -359,6 +391,7 @@ def log_market(
             momentum["price_then"],
             momentum["momentum_pct"],
             momentum["volume_ratio"],
+            expected_yes_price,
             market["yes_price"],
             market["no_price"],
             divergence,
@@ -373,6 +406,7 @@ def log_signal(
     signal,
     market,
     momentum,
+    expected_yes_price,
     divergence,
     time_left
 ):
@@ -392,6 +426,7 @@ def log_signal(
             momentum["price_now"],
             momentum["momentum_pct"],
             momentum["volume_ratio"],
+            expected_yes_price,
             market["yes_price"],
             market["no_price"],
             divergence,
@@ -410,7 +445,7 @@ def main():
 
     print(
         "BTC REPO-STYLE "
-        "POLYMARKET BOT"
+        "DYNAMIC FAIR VALUE BOT"
     )
 
     print("=" * 60)
@@ -452,14 +487,16 @@ def main():
                 get_time_left()
             )
 
-            signal, result = (
-                analyze_signal(
-                    momentum,
-                    market
-                )
+            (
+                signal,
+                result,
+                divergence
+            ) = analyze_signal(
+                momentum,
+                market
             )
 
-            divergence = (
+            expected_yes_price = (
                 result
                 if isinstance(
                     result,
@@ -501,7 +538,12 @@ def main():
             )
 
             print(
-                f"YES Price: "
+                f"Expected YES: "
+                f"{expected_yes_price:.3f}"
+            )
+
+            print(
+                f"Actual YES: "
                 f"{market['yes_price']:.3f}"
             )
 
@@ -511,17 +553,23 @@ def main():
             )
 
             print(
+                f"Divergence: "
+                f"{divergence:.3f}"
+            )
+
+            print(
                 f"Time Left: "
                 f"{time_left}s"
             )
 
             # =====================================
-            # LOG EVERYTHING
+            # LOG MARKET
             # =====================================
 
             log_market(
                 market,
                 momentum,
+                expected_yes_price,
                 divergence,
                 time_left
             )
@@ -558,6 +606,7 @@ def main():
                     signal,
                     market,
                     momentum,
+                    expected_yes_price,
                     divergence,
                     time_left
                 )
