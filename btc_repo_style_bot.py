@@ -461,6 +461,66 @@ def log_signal(
         ])
 
 # =====================================================
+# EXTRACT WINNER
+# =====================================================
+
+def extract_winner(market_data):
+
+    # DEBUG OUTPUT
+    print()
+    print("=" * 60)
+    print("DEBUG MARKET DATA")
+    print("=" * 60)
+
+    try:
+
+        print(
+            json.dumps(
+                market_data,
+                indent=2
+            )[:3000]
+        )
+
+    except Exception:
+        pass
+
+    print("=" * 60)
+
+    # POSSIBLE FIELDS
+
+    if "outcome" in market_data:
+
+        val = str(
+            market_data["outcome"]
+        ).upper()
+
+        if val in ["YES", "NO"]:
+
+            return val
+
+    if "winner" in market_data:
+
+        val = str(
+            market_data["winner"]
+        ).upper()
+
+        if val in ["YES", "NO"]:
+
+            return val
+
+    if "resolution" in market_data:
+
+        val = str(
+            market_data["resolution"]
+        ).upper()
+
+        if val in ["YES", "NO"]:
+
+            return val
+
+    return None
+
+# =====================================================
 # MAIN
 # =====================================================
 
@@ -714,17 +774,25 @@ def main():
 
                     if not data:
 
+                        print(
+                            "No resolution data"
+                        )
+
                         continue
 
                     market_data = data[0]
 
-                    winner = (
+                    winner = extract_winner(
                         market_data
-                        .get("outcome", "")
-                        .upper()
                     )
 
                     if not winner:
+
+                        print(
+                            "Winner not found"
+                        )
+
+                        remaining_signals.append(s)
 
                         continue
 
