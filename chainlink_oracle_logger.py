@@ -12,7 +12,7 @@ import websocket
 CSV_FILE = "chainlink_btc_prices.csv"
 
 WS_URL = (
-    "wss://ws-subscriptions-clob.polymarket.com/ws/"
+    "wss://ws-live-data.polymarket.com/"
 )
 
 # =====================================================
@@ -87,6 +87,10 @@ def on_message(
 
         topic = data.get("topic")
 
+        # =============================================
+        # ONLY CHAINLINK BTC STREAM
+        # =============================================
+
         if (
             topic
             != "crypto_prices_chainlink"
@@ -124,9 +128,9 @@ def on_message(
 
             return
 
-        # =========================================
+        # =============================================
         # CONVERT 18-DECIMAL FIXED POINT
-        # =========================================
+        # =============================================
 
         btc_price = (
             int(full_value)
@@ -153,9 +157,9 @@ def on_message(
 
         print("=" * 60)
 
-        # =========================================
+        # =============================================
         # SAVE
-        # =========================================
+        # =============================================
 
         save_price(
             oracle_ts,
@@ -177,9 +181,15 @@ def on_error(
     error
 ):
 
+    print()
+
+    print("=" * 60)
+
     print(
         f"WebSocket error: {error}"
     )
+
+    print("=" * 60)
 
 # =====================================================
 # CLOSE HANDLER
@@ -213,13 +223,13 @@ def on_open(ws):
 
     print(
         "CONNECTED TO "
-        "POLYMARKET CHAINLINK FEED"
+        "POLYMARKET LIVE DATA"
     )
 
     print("=" * 60)
 
     # =============================================
-    # SUBSCRIBE
+    # SUBSCRIBE TO CHAINLINK BTC STREAM
     # =============================================
 
     subscribe_msg = {
@@ -233,7 +243,9 @@ def on_open(ws):
     }
 
     ws.send(
-        json.dumps(subscribe_msg)
+        json.dumps(
+            subscribe_msg
+        )
     )
 
     print()
@@ -297,9 +309,19 @@ def main():
 
         except Exception as e:
 
+            print()
+
+            print("=" * 60)
+
             print(
                 f"Reconnect error: {e}"
             )
+
+            print(
+                "Retrying in 5s..."
+            )
+
+            print("=" * 60)
 
             time.sleep(5)
 
