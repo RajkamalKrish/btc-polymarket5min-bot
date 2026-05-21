@@ -1,359 +1,233 @@
-import csv
-import json
-import time
-from datetime import datetime
+# polymarket_chainlink_logger.py
 
 import websocket
+import json
+import threading
+import time
+import sqlite3
+from datetime import datetime
+from collections import deque
 
-# =====================================================
+# ============================================================
 # CONFIG
-# =====================================================
+# ============================================================
 
-CSV_FILE = "chainlink_btc_prices.csv"
+WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws"
 
-WS_URL = (
-    "wss://ws-live-data.polymarket.com/"
+DB_NAME = "btc_chainlink.db"
+
+SAVE_RAW_MESSAGES = True
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS btc_ticks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    asset TEXT,
+    price REAL
 )
+""")
 
-# =====================================================
-# CSV SETUP
-# =====================================================
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS raw_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    message TEXT
+)
+""")
 
-def setup_csv():
+conn.commit()
+
+# ============================================================
+# MEMORY
+# ============================================================
+
+price_buffer = deque(maxlen=300)
+
+latest_price = None
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def now():
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+def save_tick(asset, price):
+    cursor.execute("""
+    INSERT INTO btc_ticks (timestamp, asset, price)
+    VALUES (?, ?, ?)
+    """, (now(), asset, price))
+    conn.commit()
+
+def save_raw(message):
+    cursor.execute("""
+    INSERT INTO raw_messages (timestamp, message)
+    VALUES (?, ?)
+    """, (now(), message))
+    conn.commit()
+
+# ============================================================
+# ANALYTICS
+# ============================================================
+
+def calculate_momentum():
+    if len(price_buffer) < 20:
+        return 0
+
+    old_price = price_buffer[0]
+    new_price = price_buffer[-1]
+
+    return new_price - old_price
+
+def calculate_volatility():
+    if len(price_buffer) < 20:
+        return 0
+
+    prices = list(price_buffer)
+
+    returns = []
+
+    for i in range(1, len(prices)):
+        returns.append(abs(prices[i] - prices[i - 1]))
+
+    return sum(returns) / len(returns)
+
+def print_stats():
+    global latest_price
+
+    while True:
+        time.sleep(5)
+
+        if latest_price is None:
+            continue
+
+        momentum = calculate_momentum()
+        volatility = calculate_volatility()
+
+        signal = "SKIP"
+
+        if momentum > 20:
+            signal = "UP"
+
+        elif momentum < -20:
+            signal = "DOWN"
+
+        print("\n================================================")
+        print("LIVE BTC ANALYSIS")
+        print("================================================")
+        print("TIME:", now())
+        print("PRICE:", latest_price)
+        print("MOMENTUM:", round(momentum, 2))
+        print("VOLATILITY:", round(volatility, 2))
+        print("SIGNAL:", signal)
+
+# ============================================================
+# WEBSOCKET EVENTS
+# ============================================================
+
+def on_open(ws):
+    print("\n================================================")
+    print("CONNECTED TO POLYMARKET LIVE DATA")
+    print("================================================")
+
+    subscribe_msg = {
+        "type": "subscribe",
+        "channel": "crypto_prices_chainlink"
+    }
+
+    ws.send(json.dumps(subscribe_msg))
+
+    print("\nSubscribed to:")
+    print("crypto_prices_chainlink")
+
+def on_message(ws, message):
+    global latest_price
 
     try:
+        print("\nRAW MESSAGE:")
+        print(message)
 
-        with open(
-            CSV_FILE,
-            "x",
-            newline=""
-        ) as f:
-
-            writer = csv.writer(f)
-
-            writer.writerow([
-
-                "local_timestamp",
-
-                "oracle_timestamp",
-
-                "btc_price"
-
-            ])
-
-    except FileExistsError:
-        pass
-
-# =====================================================
-# SAVE PRICE
-# =====================================================
-
-def save_price(
-    oracle_ts,
-    btc_price
-):
-
-    with open(
-        CSV_FILE,
-        "a",
-        newline=""
-    ) as f:
-
-        writer = csv.writer(f)
-
-        writer.writerow([
-
-            datetime.utcnow()
-            .isoformat(),
-
-            oracle_ts,
-
-            btc_price
-
-        ])
-
-# =====================================================
-# MESSAGE HANDLER
-# =====================================================
-
-def on_message(
-    ws,
-    message
-):
-
-    try:
+        if SAVE_RAW_MESSAGES:
+            save_raw(message)
 
         data = json.loads(message)
 
-        # =============================================
-        # DEBUG RAW MESSAGE
-        # =============================================
+        # ----------------------------------------------------
+        # EXPECTED FORMAT
+        # ----------------------------------------------------
+        #
+        # {
+        #   "channel":"crypto_prices_chainlink",
+        #   "data":{
+        #       "asset":"BTC",
+        #       "price":108245.23,
+        #       "timestamp":"..."
+        #   }
+        # }
+        #
+        # ----------------------------------------------------
 
-        print()
-
-        print("RAW MESSAGE:")
-        print(data)
-
-        topic = data.get("topic")
-
-        # =============================================
-        # ONLY CHAINLINK BTC STREAM
-        # =============================================
-
-        if (
-            topic
-            != "crypto_prices_chainlink"
-        ):
-
+        if "data" not in data:
             return
 
-        payload = data.get(
-            "payload",
-            {}
-        )
+        tick = data["data"]
 
-        symbol = payload.get(
-            "symbol",
-            ""
-        ).lower()
+        asset = tick.get("asset")
+        price = tick.get("price")
 
-        if symbol != "btc/usd":
-
+        if asset is None or price is None:
             return
 
-        full_value = payload.get(
-            "full_accuracy_value"
-        )
+        latest_price = float(price)
 
-        oracle_ts = payload.get(
-            "timestamp"
-        )
+        price_buffer.append(latest_price)
 
-        if (
-            not full_value
-            or
-            not oracle_ts
-        ):
+        save_tick(asset, latest_price)
 
-            return
-
-        # =============================================
-        # CONVERT 18 DECIMAL FIXED POINT
-        # =============================================
-
-        btc_price = (
-            int(full_value)
-            / 1e18
-        )
-
-        print()
-
-        print("=" * 60)
-
-        print(
-            "CHAINLINK BTC UPDATE"
-        )
-
-        print(
-            f"Oracle TS: "
-            f"{oracle_ts}"
-        )
-
-        print(
-            f"BTC/USD: "
-            f"{btc_price:,.2f}"
-        )
-
-        print("=" * 60)
-
-        # =============================================
-        # SAVE TO CSV
-        # =============================================
-
-        save_price(
-            oracle_ts,
-            btc_price
-        )
+        print("\nBTC TICK SAVED")
+        print("ASSET:", asset)
+        print("PRICE:", latest_price)
 
     except Exception as e:
+        print("\nERROR PROCESSING MESSAGE")
+        print(str(e))
 
-        print()
+def on_error(ws, error):
+    print("\nWEBSOCKET ERROR")
+    print(error)
 
-        print("=" * 60)
+def on_close(ws, close_status_code, close_msg):
+    print("\n================================================")
+    print("WEBSOCKET CLOSED")
+    print("================================================")
+    print(close_status_code)
+    print(close_msg)
 
-        print(
-            f"Message error: {e}"
-        )
-
-        print("=" * 60)
-
-# =====================================================
-# ERROR HANDLER
-# =====================================================
-
-def on_error(
-    ws,
-    error
-):
-
-    print()
-
-    print("=" * 60)
-
-    print(
-        f"WebSocket error: {error}"
-    )
-
-    print("=" * 60)
-
-# =====================================================
-# CLOSE HANDLER
-# =====================================================
-
-def on_close(
-    ws,
-    close_status_code,
-    close_msg
-):
-
-    print()
-
-    print("=" * 60)
-
-    print(
-        "WebSocket closed"
-    )
-
-    print("=" * 60)
-
-# =====================================================
-# OPEN HANDLER
-# =====================================================
-
-def on_open(ws):
-
-    print()
-
-    print("=" * 60)
-
-    print(
-        "CONNECTED TO "
-        "POLYMARKET LIVE DATA"
-    )
-
-    print("=" * 60)
-
-    # =============================================
-    # EXACT PM SUBSCRIPTION FORMAT
-    # =============================================
-
-    subscribe_msg = {
-
-        "action": "subscribe",
-
-        "subscriptions": [
-
-            {
-                "topic":
-                    "crypto_prices_chainlink",
-
-                "type":
-                    "update",
-
-                "filters":
-                    "{\"symbol\":\"btc/usd\"}"
-            }
-
-        ]
-    }
-
-    ws.send(
-        json.dumps(
-            subscribe_msg
-        )
-    )
-
-    print()
-
-    print(
-        "Subscribed to:"
-    )
-
-    print(
-        "crypto_prices_chainlink"
-    )
-
-    print()
-
-# =====================================================
+# ============================================================
 # MAIN
-# =====================================================
-
-def main():
-
-    setup_csv()
-
-    print("=" * 60)
-
-    print(
-        "POLYMARKET "
-        "CHAINLINK LOGGER"
-    )
-
-    print("=" * 60)
-
-    while True:
-
-        try:
-
-            ws = websocket.WebSocketApp(
-
-                WS_URL,
-
-                on_open=on_open,
-
-                on_message=on_message,
-
-                on_error=on_error,
-
-                on_close=on_close
-
-            )
-
-            ws.run_forever()
-
-        except KeyboardInterrupt:
-
-            print()
-
-            print(
-                "Stopping logger..."
-            )
-
-            break
-
-        except Exception as e:
-
-            print()
-
-            print("=" * 60)
-
-            print(
-                f"Reconnect error: {e}"
-            )
-
-            print(
-                "Retrying in 5 seconds..."
-            )
-
-            print("=" * 60)
-
-            time.sleep(5)
-
-# =====================================================
-# START
-# =====================================================
+# ============================================================
 
 if __name__ == "__main__":
 
-    main()
+    print("============================================================")
+    print("POLYMARKET CHAINLINK LOGGER")
+    print("============================================================")
+
+    threading.Thread(target=print_stats, daemon=True).start()
+
+    ws = websocket.WebSocketApp(
+        WS_URL,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+
+    ws.run_forever()
