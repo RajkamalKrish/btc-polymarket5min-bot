@@ -51,6 +51,7 @@ def setup_csv():
             writer.writerow([
                 "timestamp",
                 "market_slug",
+                "pm_price_to_beat",
                 "btc_now",
                 "btc_then",
                 "momentum_pct",
@@ -78,6 +79,7 @@ def setup_csv():
             writer.writerow([
                 "timestamp",
                 "market_slug",
+                "pm_price_to_beat",
                 "signal",
                 "btc_now",
                 "momentum_pct",
@@ -113,6 +115,8 @@ def setup_resolved_csv():
                 "market_slug",
                 "signal",
                 "entry_price",
+                "start_price",
+                "end_price",
                 "winner",
                 "result",
                 "pnl",
@@ -146,6 +150,61 @@ def get_time_left():
     ts = int(time.time())
 
     return 300 - (ts % 300)
+
+# =====================================================
+# EXTRACT PM PRICE
+# =====================================================
+
+def extract_price_to_beat(market):
+
+    possible_fields = [
+
+        "priceToBeat",
+        "strikePrice",
+        "referencePrice",
+        "btcPrice",
+        "initialPrice"
+
+    ]
+
+    for field in possible_fields:
+
+        if field in market:
+
+            try:
+
+                return float(
+                    market[field]
+                )
+
+            except Exception:
+
+                pass
+
+    # =============================================
+    # DEBUG FULL JSON
+    # =============================================
+
+    print()
+    print("=" * 60)
+    print("FULL MARKET JSON")
+    print("=" * 60)
+
+    try:
+
+        print(
+            json.dumps(
+                market,
+                indent=2
+            )[:5000]
+        )
+
+    except Exception:
+        pass
+
+    print("=" * 60)
+
+    return None
 
 # =====================================================
 # FETCH POLYMARKET
@@ -187,13 +246,33 @@ def fetch_market():
 
         no_price = float(prices[1])
 
+        price_to_beat = (
+            extract_price_to_beat(
+                market
+            )
+        )
+
         return {
-            "slug": slug,
-            "yes_price": yes_price,
-            "no_price": no_price,
+
+            "slug":
+                slug,
+
+            "yes_price":
+                yes_price,
+
+            "no_price":
+                no_price,
+
+            "price_to_beat":
+                price_to_beat
+
         }
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"Fetch error: {e}"
+        )
 
         return None
 
@@ -263,11 +342,22 @@ def get_binance_momentum():
         )
 
         return {
-            "price_now": price_now,
-            "price_then": price_then,
-            "momentum_pct": momentum_pct,
-            "volume_ratio": volume_ratio,
-            "direction": direction,
+
+            "price_now":
+                price_now,
+
+            "price_then":
+                price_then,
+
+            "momentum_pct":
+                momentum_pct,
+
+            "volume_ratio":
+                volume_ratio,
+
+            "direction":
+                direction
+
         }
 
     except Exception:
@@ -350,41 +440,6 @@ def analyze_signal(
             divergence
         )
 
-    # =============================================
-    # FEE FILTER
-    # =============================================
-
-    buy_price = (
-        yes_price
-        if signal == "BUY_YES"
-        else 1 - yes_price
-    )
-
-    win_profit = (
-        (1 - buy_price)
-        * (1 - FEE_RATE)
-    )
-
-    breakeven = (
-        buy_price
-        / (
-            win_profit
-            + buy_price
-        )
-    )
-
-    fee_penalty = (
-        breakeven - 0.50
-    )
-
-    if divergence < fee_penalty:
-
-        return (
-            None,
-            "fees eat edge",
-            divergence
-        )
-
     return (
         signal,
         expected_yes_price,
@@ -412,17 +467,32 @@ def log_market(
         writer = csv.writer(f)
 
         writer.writerow([
-            datetime.utcnow().isoformat(),
+
+            datetime.utcnow()
+            .isoformat(),
+
             market["slug"],
+
+            market["price_to_beat"],
+
             momentum["price_now"],
+
             momentum["price_then"],
+
             momentum["momentum_pct"],
+
             momentum["volume_ratio"],
+
             expected_yes_price,
+
             market["yes_price"],
+
             market["no_price"],
+
             divergence,
+
             time_left
+
         ])
 
 # =====================================================
@@ -447,17 +517,32 @@ def log_signal(
         writer = csv.writer(f)
 
         writer.writerow([
-            datetime.utcnow().isoformat(),
+
+            datetime.utcnow()
+            .isoformat(),
+
             market["slug"],
+
+            market["price_to_beat"],
+
             signal,
+
             momentum["price_now"],
+
             momentum["momentum_pct"],
+
             momentum["volume_ratio"],
+
             expected_yes_price,
+
             market["yes_price"],
+
             market["no_price"],
+
             divergence,
+
             time_left
+
         ])
 
 # =====================================================
@@ -475,8 +560,8 @@ def main():
     print("=" * 60)
 
     print(
-        "BTC REPO-STYLE "
-        "PM-NATIVE RESOLUTION BOT"
+        "BTC PM-NATIVE "
+        "SELF-RESOLVING BOT"
     )
 
     print("=" * 60)
@@ -544,13 +629,13 @@ def main():
             )
 
             print(
-                f"BTC Now: "
-                f"${momentum['price_now']:,.2f}"
+                f"PM Price To Beat: "
+                f"{market['price_to_beat']}"
             )
 
             print(
-                f"BTC Then: "
-                f"${momentum['price_then']:,.2f}"
+                f"BTC Now: "
+                f"${momentum['price_now']:,.2f}"
             )
 
             print(
@@ -559,28 +644,8 @@ def main():
             )
 
             print(
-                f"Volume Ratio: "
-                f"{momentum['volume_ratio']:.2f}x"
-            )
-
-            print(
-                f"Direction: "
-                f"{momentum['direction']}"
-            )
-
-            print(
-                f"Expected YES: "
-                f"{expected_yes_price:.3f}"
-            )
-
-            print(
-                f"Actual YES: "
+                f"YES Price: "
                 f"{market['yes_price']:.3f}"
-            )
-
-            print(
-                f"NO Price: "
-                f"{market['no_price']:.3f}"
             )
 
             print(
@@ -606,7 +671,7 @@ def main():
             )
 
             # =====================================
-            # FINAL ENTRY WINDOW
+            # SIGNAL
             # =====================================
 
             if (
@@ -622,11 +687,6 @@ def main():
 
                 print(
                     f"SIGNAL: {signal}"
-                )
-
-                print(
-                    f"DIVERGENCE: "
-                    f"{divergence:.3f}"
                 )
 
                 print("=" * 60)
@@ -659,11 +719,18 @@ def main():
                     "entry_price":
                         entry_price,
 
+                    "start_price":
+                        market[
+                            "price_to_beat"
+                        ],
+
                     "divergence":
                         divergence,
 
                     "momentum_pct":
-                        momentum["momentum_pct"]
+                        momentum[
+                            "momentum_pct"
+                        ]
 
                 })
 
@@ -673,9 +740,9 @@ def main():
                     f"Skip: {result}"
                 )
 
-            # ==========================================
-            # RESOLVE USING NEXT EVENT
-            # ==========================================
+            # =====================================
+            # RESOLVE USING NEXT PM EVENT
+            # =====================================
 
             remaining_signals = []
 
@@ -706,9 +773,9 @@ def main():
                     f"btc-updown-5m-{next_ts}"
                 )
 
-                # ==================================
+                # =================================
                 # WAIT FOR NEXT MARKET
-                # ==================================
+                # =================================
 
                 if (
                     current_market_slug
@@ -731,26 +798,39 @@ def main():
 
                         continue
 
-                    # ==================================
-                    # PM NEXT EVENT INTERPRETATION
-                    # ==================================
-
-                    next_yes_price = (
+                    end_price = (
                         current_market[
-                            "yes_price"
+                            "price_to_beat"
                         ]
                     )
 
+                    if (
+                        end_price is None
+                        or
+                        s["start_price"]
+                        is None
+                    ):
+
+                        remaining_signals.append(
+                            s
+                        )
+
+                        continue
+
+                    # =================================
+                    # TRUE PM-NATIVE RESOLUTION
+                    # =================================
+
                     winner = (
                         "YES"
-                        if next_yes_price
-                        >= 0.5
+                        if end_price
+                        >= s["start_price"]
                         else "NO"
                     )
 
-                    # ==================================
+                    # =================================
                     # WIN / LOSS
-                    # ==================================
+                    # =================================
 
                     if (
                         s["signal"]
@@ -800,18 +880,30 @@ def main():
                     )
 
                     print(
-                        f"Winner: {winner}"
+                        f"Start Price: "
+                        f"{s['start_price']}"
                     )
 
                     print(
-                        f"PnL: {pnl:.4f}"
+                        f"End Price: "
+                        f"{end_price}"
+                    )
+
+                    print(
+                        f"Winner: "
+                        f"{winner}"
+                    )
+
+                    print(
+                        f"PnL: "
+                        f"{pnl:.4f}"
                     )
 
                     print("=" * 60)
 
-                    # ==================================
+                    # =================================
                     # SAVE
-                    # ==================================
+                    # =================================
 
                     with open(
                         RESOLVED_CSV,
@@ -831,6 +923,10 @@ def main():
                             s["signal"],
 
                             s["entry_price"],
+
+                            s["start_price"],
+
+                            end_price,
 
                             winner,
 
