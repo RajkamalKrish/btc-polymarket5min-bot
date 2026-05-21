@@ -1,14 +1,26 @@
+# btc_5m_logger.py
+
 import websocket
 import json
+from datetime import datetime
 
 WS_URL = "wss://ws-live-data.polymarket.com"
 
 # ============================================================
-# ON OPEN
+# SETTINGS
+# ============================================================
+
+TARGET_SYMBOL = "btc/usd"
+
+# ============================================================
+# OPEN
 # ============================================================
 
 def on_open(ws):
-    print("\nCONNECTED TO POLYMARKET RTDS")
+
+    print("================================================")
+    print("CONNECTED TO POLYMARKET RTDS")
+    print("================================================")
 
     subscribe_msg = {
         "action": "subscribe",
@@ -23,45 +35,45 @@ def on_open(ws):
 
     ws.send(json.dumps(subscribe_msg))
 
-    print("SUBSCRIBED TO CHAINLINK BTC FEED")
+    print("\nSubscribed to BTC Chainlink feed")
 
 # ============================================================
-# ON MESSAGE
+# MESSAGE
 # ============================================================
 
 def on_message(ws, message):
 
-    print("\nRAW:")
-    print(message)
-
     try:
+
         data = json.loads(message)
 
-        # BTC PRICE UPDATE FORMAT
-        #
-        # {
-        #   "topic":"crypto_prices_chainlink",
-        #   "type":"update",
-        #   "timestamp":1753314088421,
-        #   "payload":{
-        #       "symbol":"btc/usd",
-        #       "timestamp":1753314088395,
-        #       "value":67234.50
-        #   }
-        # }
+        if data.get("topic") != "crypto_prices_chainlink":
+            return
 
-        if data.get("topic") == "crypto_prices_chainlink":
+        payload = data.get("payload", {})
 
-            payload = data.get("payload", {})
+        symbol = payload.get("symbol", "").lower()
 
-            symbol = payload.get("symbol")
-            price = payload.get("value")
+        # ====================================================
+        # ONLY BTC
+        # ====================================================
 
-            print("\n============================")
-            print("BTC PRICE UPDATE")
-            print("============================")
-            print("SYMBOL:", symbol)
-            print("PRICE :", price)
+        if symbol != TARGET_SYMBOL:
+            return
+
+        price = payload.get("value")
+        timestamp = payload.get("timestamp")
+
+        readable_time = datetime.utcfromtimestamp(
+            timestamp / 1000
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        print("\n================================================")
+        print("BTC LIVE PRICE")
+        print("================================================")
+        print("TIME   :", readable_time)
+        print("SYMBOL :", symbol)
+        print("PRICE  :", price)
 
     except Exception as e:
         print("ERROR:", e)
