@@ -11,14 +11,11 @@ import requests
 
 LOOKBACK_MINUTES = 5
 
-# RELAXED THRESHOLDS
 MIN_MOMENTUM_PCT = 0.12
 MIN_VOLUME_RATIO = 0.25
 
-# DYNAMIC FAIR VALUE MULTIPLIER
 MOMENTUM_FACTOR = 0.80
 
-# MINIMUM EDGE REQUIRED
 MIN_DIVERGENCE_EDGE = 0.03
 
 TRADE_WINDOW_SECONDS = 10
@@ -27,6 +24,13 @@ FEE_RATE = 0.10
 
 SIGNALS_CSV = "signals.csv"
 MARKET_CSV = "market_data.csv"
+RESOLVED_CSV = "resolved_signals.csv"
+
+# =====================================================
+# OPEN SIGNAL TRACKER
+# =====================================================
+
+open_signals = []
 
 # =====================================================
 # CSV SETUP
@@ -83,6 +87,37 @@ def setup_csv():
                 "no_price",
                 "divergence",
                 "time_left"
+            ])
+
+    except FileExistsError:
+        pass
+
+# =====================================================
+# RESOLVED CSV
+# =====================================================
+
+def setup_resolved_csv():
+
+    try:
+
+        with open(
+            RESOLVED_CSV,
+            "x",
+            newline=""
+        ) as f:
+
+            writer = csv.writer(f)
+
+            writer.writerow([
+                "timestamp",
+                "market_slug",
+                "signal",
+                "entry_price",
+                "winner",
+                "result",
+                "pnl",
+                "divergence",
+                "momentum_pct"
             ])
 
     except FileExistsError:
@@ -252,17 +287,9 @@ def analyze_signal(
         momentum["momentum_pct"]
     )
 
-    # =============================================
-    # MOMENTUM FILTER
-    # =============================================
-
     if momentum_pct < MIN_MOMENTUM_PCT:
 
         return None, "weak momentum", 0
-
-    # =============================================
-    # VOLUME FILTER
-    # =============================================
 
     if (
         momentum["volume_ratio"]
@@ -274,7 +301,7 @@ def analyze_signal(
     yes_price = market["yes_price"]
 
     # =============================================
-    # DYNAMIC FAIR VALUE MODEL
+    # FAIR VALUE
     # =============================================
 
     if momentum["direction"] == "up":
@@ -439,13 +466,17 @@ def log_signal(
 
 def main():
 
+    global open_signals
+
     setup_csv()
+
+    setup_resolved_csv()
 
     print("=" * 60)
 
     print(
         "BTC REPO-STYLE "
-        "DYNAMIC FAIR VALUE BOT"
+        "LIVE RESOLUTION BOT"
     )
 
     print("=" * 60)
@@ -575,7 +606,7 @@ def main():
             )
 
             # =====================================
-            # FINAL 10 SECONDS ONLY
+            # FINAL ENTRY WINDOW
             # =====================================
 
             if (
@@ -611,11 +642,181 @@ def main():
                     time_left
                 )
 
+                entry_price = (
+                    market["yes_price"]
+                    if signal == "BUY_YES"
+                    else market["no_price"]
+                )
+
+                expiry_ts = (
+                    int(time.time())
+                    + time_left
+                    + 15
+                )
+
+                open_signals.append({
+
+                    "expiry_ts":
+                        expiry_ts,
+
+                    "market_slug":
+                        market["slug"],
+
+                    "signal":
+                        signal,
+
+                    "entry_price":
+                        entry_price,
+
+                    "divergence":
+                        divergence,
+
+                    "momentum_pct":
+                        momentum["momentum_pct"]
+
+                })
+
             else:
 
                 print(
                     f"Skip: {result}"
                 )
+
+            # ==========================================
+            # RESOLVE EXPIRED SIGNALS
+            # ==========================================
+
+            now_ts = int(time.time())
+
+            remaining_signals = []
+
+            for s in open_signals:
+
+                if now_ts < s["expiry_ts"]:
+
+                    remaining_signals.append(s)
+
+                    continue
+
+                try:
+
+                    url = (
+                        "https://gamma-api.polymarket.com/markets"
+                        f"?slug={s['market_slug']}"
+                    )
+
+                    r = requests.get(
+                        url,
+                        timeout=10
+                    )
+
+                    data = r.json()
+
+                    if not data:
+
+                        continue
+
+                    market_data = data[0]
+
+                    winner = (
+                        market_data
+                        .get("outcome", "")
+                        .upper()
+                    )
+
+                    if not winner:
+
+                        continue
+
+                    # ======================================
+                    # WIN / LOSS
+                    # ======================================
+
+                    if s["signal"] == "BUY_YES":
+
+                        won = (
+                            winner == "YES"
+                        )
+
+                    else:
+
+                        won = (
+                            winner == "NO"
+                        )
+
+                    if won:
+
+                        pnl = (
+                            (1 - s["entry_price"])
+                            * (1 - FEE_RATE)
+                        )
+
+                        result = "WIN"
+
+                    else:
+
+                        pnl = -s["entry_price"]
+
+                        result = "LOSS"
+
+                    print()
+
+                    print("=" * 60)
+
+                    print(
+                        f"RESOLVED: "
+                        f"{s['signal']} "
+                        f"→ {result}"
+                    )
+
+                    print(
+                        f"Winner: {winner}"
+                    )
+
+                    print(
+                        f"PnL: {pnl:.4f}"
+                    )
+
+                    print("=" * 60)
+
+                    with open(
+                        RESOLVED_CSV,
+                        "a",
+                        newline=""
+                    ) as f:
+
+                        writer = csv.writer(f)
+
+                        writer.writerow([
+
+                            datetime.utcnow()
+                            .isoformat(),
+
+                            s["market_slug"],
+
+                            s["signal"],
+
+                            s["entry_price"],
+
+                            winner,
+
+                            result,
+
+                            round(pnl, 4),
+
+                            s["divergence"],
+
+                            s["momentum_pct"]
+
+                        ])
+
+                except Exception as e:
+
+                    print(
+                        f"Resolve error: {e}"
+                    )
+
+            open_signals = remaining_signals
 
             print("-" * 60)
 
