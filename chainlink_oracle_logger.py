@@ -85,10 +85,8 @@ def on_message(
 
         data = json.loads(message)
 
-        topic = data.get("topic")
-
         # =============================================
-        # DEBUG
+        # DEBUG RAW MESSAGE
         # =============================================
 
         print()
@@ -96,8 +94,10 @@ def on_message(
         print("RAW MESSAGE:")
         print(data)
 
+        topic = data.get("topic")
+
         # =============================================
-        # ONLY CHAINLINK STREAM
+        # ONLY CHAINLINK BTC STREAM
         # =============================================
 
         if (
@@ -138,7 +138,7 @@ def on_message(
             return
 
         # =============================================
-        # CONVERT 18 DECIMAL
+        # CONVERT 18 DECIMAL FIXED POINT
         # =============================================
 
         btc_price = (
@@ -166,6 +166,10 @@ def on_message(
 
         print("=" * 60)
 
+        # =============================================
+        # SAVE TO CSV
+        # =============================================
+
         save_price(
             oracle_ts,
             btc_price
@@ -173,12 +177,18 @@ def on_message(
 
     except Exception as e:
 
+        print()
+
+        print("=" * 60)
+
         print(
             f"Message error: {e}"
         )
 
+        print("=" * 60)
+
 # =====================================================
-# ERROR
+# ERROR HANDLER
 # =====================================================
 
 def on_error(
@@ -197,7 +207,7 @@ def on_error(
     print("=" * 60)
 
 # =====================================================
-# CLOSE
+# CLOSE HANDLER
 # =====================================================
 
 def on_close(
@@ -217,7 +227,7 @@ def on_close(
     print("=" * 60)
 
 # =====================================================
-# OPEN
+# OPEN HANDLER
 # =====================================================
 
 def on_open(ws):
@@ -234,7 +244,7 @@ def on_open(ws):
     print("=" * 60)
 
     # =============================================
-    # CORRECT PM SUBSCRIPTION FORMAT
+    # EXACT PM SUBSCRIPTION FORMAT
     # =============================================
 
     subscribe_msg = {
@@ -245,11 +255,16 @@ def on_open(ws):
 
             {
                 "topic":
-                    "crypto_prices_chainlink"
+                    "crypto_prices_chainlink",
+
+                "type":
+                    "update",
+
+                "filters":
+                    "{\"symbol\":\"btc/usd\"}"
             }
 
         ]
-
     }
 
     ws.send(
@@ -267,6 +282,8 @@ def on_open(ws):
     print(
         "crypto_prices_chainlink"
     )
+
+    print()
 
 # =====================================================
 # MAIN
@@ -326,7 +343,7 @@ def main():
             )
 
             print(
-                "Retrying in 5s..."
+                "Retrying in 5 seconds..."
             )
 
             print("=" * 60)
