@@ -461,66 +461,6 @@ def log_signal(
         ])
 
 # =====================================================
-# EXTRACT WINNER
-# =====================================================
-
-def extract_winner(market_data):
-
-    # DEBUG OUTPUT
-    print()
-    print("=" * 60)
-    print("DEBUG MARKET DATA")
-    print("=" * 60)
-
-    try:
-
-        print(
-            json.dumps(
-                market_data,
-                indent=2
-            )[:3000]
-        )
-
-    except Exception:
-        pass
-
-    print("=" * 60)
-
-    # POSSIBLE FIELDS
-
-    if "outcome" in market_data:
-
-        val = str(
-            market_data["outcome"]
-        ).upper()
-
-        if val in ["YES", "NO"]:
-
-            return val
-
-    if "winner" in market_data:
-
-        val = str(
-            market_data["winner"]
-        ).upper()
-
-        if val in ["YES", "NO"]:
-
-            return val
-
-    if "resolution" in market_data:
-
-        val = str(
-            market_data["resolution"]
-        ).upper()
-
-        if val in ["YES", "NO"]:
-
-            return val
-
-    return None
-
-# =====================================================
 # MAIN
 # =====================================================
 
@@ -536,7 +476,7 @@ def main():
 
     print(
         "BTC REPO-STYLE "
-        "LIVE RESOLUTION BOT"
+        "PM-NATIVE RESOLUTION BOT"
     )
 
     print("=" * 60)
@@ -708,16 +648,7 @@ def main():
                     else market["no_price"]
                 )
 
-                expiry_ts = (
-                    int(time.time())
-                    + time_left
-                    + 15
-                )
-
                 open_signals.append({
-
-                    "expiry_ts":
-                        expiry_ts,
 
                     "market_slug":
                         market["slug"],
@@ -743,64 +674,88 @@ def main():
                 )
 
             # ==========================================
-            # RESOLVE EXPIRED SIGNALS
+            # RESOLVE USING NEXT EVENT
             # ==========================================
-
-            now_ts = int(time.time())
 
             remaining_signals = []
 
+            current_market_slug = (
+                get_market_slug()
+            )
+
+            current_market = (
+                fetch_market()
+            )
+
             for s in open_signals:
 
-                if now_ts < s["expiry_ts"]:
+                current_slug = (
+                    s["market_slug"]
+                )
 
-                    remaining_signals.append(s)
+                current_ts = int(
+                    current_slug
+                    .split("-")[-1]
+                )
+
+                next_ts = (
+                    current_ts + 300
+                )
+
+                next_slug = (
+                    f"btc-updown-5m-{next_ts}"
+                )
+
+                # ==================================
+                # WAIT FOR NEXT MARKET
+                # ==================================
+
+                if (
+                    current_market_slug
+                    != next_slug
+                ):
+
+                    remaining_signals.append(
+                        s
+                    )
 
                     continue
 
                 try:
 
-                    url = (
-                        "https://gamma-api.polymarket.com/markets"
-                        f"?slug={s['market_slug']}"
-                    )
+                    if not current_market:
 
-                    r = requests.get(
-                        url,
-                        timeout=10
-                    )
-
-                    data = r.json()
-
-                    if not data:
-
-                        print(
-                            "No resolution data"
+                        remaining_signals.append(
+                            s
                         )
 
                         continue
 
-                    market_data = data[0]
+                    # ==================================
+                    # PM NEXT EVENT INTERPRETATION
+                    # ==================================
 
-                    winner = extract_winner(
-                        market_data
+                    next_yes_price = (
+                        current_market[
+                            "yes_price"
+                        ]
                     )
 
-                    if not winner:
+                    winner = (
+                        "YES"
+                        if next_yes_price
+                        >= 0.5
+                        else "NO"
+                    )
 
-                        print(
-                            "Winner not found"
-                        )
-
-                        remaining_signals.append(s)
-
-                        continue
-
-                    # ======================================
+                    # ==================================
                     # WIN / LOSS
-                    # ======================================
+                    # ==================================
 
-                    if s["signal"] == "BUY_YES":
+                    if (
+                        s["signal"]
+                        == "BUY_YES"
+                    ):
 
                         won = (
                             winner == "YES"
@@ -815,15 +770,22 @@ def main():
                     if won:
 
                         pnl = (
-                            (1 - s["entry_price"])
-                            * (1 - FEE_RATE)
+                            (
+                                1
+                                - s["entry_price"]
+                            )
+                            * (
+                                1 - FEE_RATE
+                            )
                         )
 
                         result = "WIN"
 
                     else:
 
-                        pnl = -s["entry_price"]
+                        pnl = (
+                            -s["entry_price"]
+                        )
 
                         result = "LOSS"
 
@@ -846,6 +808,10 @@ def main():
                     )
 
                     print("=" * 60)
+
+                    # ==================================
+                    # SAVE
+                    # ==================================
 
                     with open(
                         RESOLVED_CSV,
@@ -870,7 +836,10 @@ def main():
 
                             result,
 
-                            round(pnl, 4),
+                            round(
+                                pnl,
+                                4
+                            ),
 
                             s["divergence"],
 
@@ -884,7 +853,9 @@ def main():
                         f"Resolve error: {e}"
                     )
 
-            open_signals = remaining_signals
+            open_signals = (
+                remaining_signals
+            )
 
             print("-" * 60)
 
