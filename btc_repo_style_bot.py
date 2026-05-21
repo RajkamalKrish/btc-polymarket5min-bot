@@ -20,23 +20,18 @@ MIN_DIVERGENCE_EDGE = 0.03
 
 TRADE_WINDOW_SECONDS = 10
 
-FEE_RATE = 0.10
-
 SIGNALS_CSV = "signals.csv"
 MARKET_CSV = "market_data.csv"
-RESOLVED_CSV = "resolved_signals.csv"
-
-# =====================================================
-# OPEN SIGNAL TRACKER
-# =====================================================
-
-open_signals = []
 
 # =====================================================
 # CSV SETUP
 # =====================================================
 
 def setup_csv():
+
+    # =============================================
+    # MARKET DATA CSV
+    # =============================================
 
     try:
 
@@ -49,22 +44,37 @@ def setup_csv():
             writer = csv.writer(f)
 
             writer.writerow([
+
                 "timestamp",
+
                 "market_slug",
-                "pm_price_to_beat",
+
                 "btc_now",
+
                 "btc_then",
+
                 "momentum_pct",
+
                 "volume_ratio",
+
                 "expected_yes_price",
+
                 "yes_price",
+
                 "no_price",
+
                 "divergence",
+
                 "time_left"
+
             ])
 
     except FileExistsError:
         pass
+
+    # =============================================
+    # SIGNALS CSV
+    # =============================================
 
     try:
 
@@ -77,51 +87,29 @@ def setup_csv():
             writer = csv.writer(f)
 
             writer.writerow([
+
                 "timestamp",
+
                 "market_slug",
-                "pm_price_to_beat",
+
                 "signal",
+
                 "btc_now",
+
                 "momentum_pct",
+
                 "volume_ratio",
+
                 "expected_yes_price",
+
                 "yes_price",
+
                 "no_price",
+
                 "divergence",
+
                 "time_left"
-            ])
 
-    except FileExistsError:
-        pass
-
-# =====================================================
-# RESOLVED CSV
-# =====================================================
-
-def setup_resolved_csv():
-
-    try:
-
-        with open(
-            RESOLVED_CSV,
-            "x",
-            newline=""
-        ) as f:
-
-            writer = csv.writer(f)
-
-            writer.writerow([
-                "timestamp",
-                "market_slug",
-                "signal",
-                "entry_price",
-                "start_price",
-                "end_price",
-                "winner",
-                "result",
-                "pnl",
-                "divergence",
-                "momentum_pct"
             ])
 
     except FileExistsError:
@@ -150,61 +138,6 @@ def get_time_left():
     ts = int(time.time())
 
     return 300 - (ts % 300)
-
-# =====================================================
-# EXTRACT PM PRICE
-# =====================================================
-
-def extract_price_to_beat(market):
-
-    possible_fields = [
-
-        "priceToBeat",
-        "strikePrice",
-        "referencePrice",
-        "btcPrice",
-        "initialPrice"
-
-    ]
-
-    for field in possible_fields:
-
-        if field in market:
-
-            try:
-
-                return float(
-                    market[field]
-                )
-
-            except Exception:
-
-                pass
-
-    # =============================================
-    # DEBUG FULL JSON
-    # =============================================
-
-    print()
-    print("=" * 60)
-    print("FULL MARKET JSON")
-    print("=" * 60)
-
-    try:
-
-        print(
-            json.dumps(
-                market,
-                indent=2
-            )[:5000]
-        )
-
-    except Exception:
-        pass
-
-    print("=" * 60)
-
-    return None
 
 # =====================================================
 # FETCH POLYMARKET
@@ -246,12 +179,6 @@ def fetch_market():
 
         no_price = float(prices[1])
 
-        price_to_beat = (
-            extract_price_to_beat(
-                market
-            )
-        )
-
         return {
 
             "slug":
@@ -261,17 +188,14 @@ def fetch_market():
                 yes_price,
 
             "no_price":
-                no_price,
-
-            "price_to_beat":
-                price_to_beat
+                no_price
 
         }
 
     except Exception as e:
 
         print(
-            f"Fetch error: {e}"
+            f"Market fetch error: {e}"
         )
 
         return None
@@ -360,7 +284,11 @@ def get_binance_momentum():
 
         }
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"Momentum error: {e}"
+        )
 
         return None
 
@@ -377,21 +305,39 @@ def analyze_signal(
         momentum["momentum_pct"]
     )
 
+    # =============================================
+    # MOMENTUM FILTER
+    # =============================================
+
     if momentum_pct < MIN_MOMENTUM_PCT:
 
-        return None, "weak momentum", 0
+        return (
+            None,
+            "weak momentum",
+            0,
+            0
+        )
+
+    # =============================================
+    # VOLUME FILTER
+    # =============================================
 
     if (
         momentum["volume_ratio"]
         < MIN_VOLUME_RATIO
     ):
 
-        return None, "low volume", 0
+        return (
+            None,
+            "low volume",
+            0,
+            0
+        )
 
     yes_price = market["yes_price"]
 
     # =============================================
-    # FAIR VALUE
+    # FAIR VALUE MODEL
     # =============================================
 
     if momentum["direction"] == "up":
@@ -437,11 +383,13 @@ def analyze_signal(
         return (
             None,
             "no edge",
+            expected_yes_price,
             divergence
         )
 
     return (
         signal,
+        "VALID",
         expected_yes_price,
         divergence
     )
@@ -472,8 +420,6 @@ def log_market(
             .isoformat(),
 
             market["slug"],
-
-            market["price_to_beat"],
 
             momentum["price_now"],
 
@@ -523,8 +469,6 @@ def log_signal(
 
             market["slug"],
 
-            market["price_to_beat"],
-
             signal,
 
             momentum["price_now"],
@@ -551,17 +495,13 @@ def log_signal(
 
 def main():
 
-    global open_signals
-
     setup_csv()
-
-    setup_resolved_csv()
 
     print("=" * 60)
 
     print(
-        "BTC PM-NATIVE "
-        "SELF-RESOLVING BOT"
+        "BTC REPO-STYLE "
+        "POLYMARKET BOT"
     )
 
     print("=" * 60)
@@ -573,6 +513,10 @@ def main():
 
         try:
 
+            # =====================================
+            # FETCH PM MARKET
+            # =====================================
+
             market = fetch_market()
 
             if not market:
@@ -581,9 +525,13 @@ def main():
                     "Market fetch failed"
                 )
 
-                time.sleep(2)
+                time.sleep(5)
 
                 continue
+
+            # =====================================
+            # FETCH BTC MOMENTUM
+            # =====================================
 
             momentum = (
                 get_binance_momentum()
@@ -595,7 +543,7 @@ def main():
                     "Momentum fetch failed"
                 )
 
-                time.sleep(2)
+                time.sleep(5)
 
                 continue
 
@@ -605,21 +553,17 @@ def main():
 
             (
                 signal,
-                result,
+                status,
+                expected_yes_price,
                 divergence
             ) = analyze_signal(
                 momentum,
                 market
             )
 
-            expected_yes_price = (
-                result
-                if isinstance(
-                    result,
-                    float
-                )
-                else 0
-            )
+            # =====================================
+            # PRINT LIVE STATUS
+            # =====================================
 
             print()
 
@@ -629,13 +573,13 @@ def main():
             )
 
             print(
-                f"PM Price To Beat: "
-                f"{market['price_to_beat']}"
+                f"BTC Now: "
+                f"${momentum['price_now']:,.2f}"
             )
 
             print(
-                f"BTC Now: "
-                f"${momentum['price_now']:,.2f}"
+                f"BTC Then: "
+                f"${momentum['price_then']:,.2f}"
             )
 
             print(
@@ -644,8 +588,28 @@ def main():
             )
 
             print(
-                f"YES Price: "
+                f"Volume Ratio: "
+                f"{momentum['volume_ratio']:.2f}x"
+            )
+
+            print(
+                f"Direction: "
+                f"{momentum['direction']}"
+            )
+
+            print(
+                f"Expected YES: "
+                f"{expected_yes_price:.3f}"
+            )
+
+            print(
+                f"Actual YES: "
                 f"{market['yes_price']:.3f}"
+            )
+
+            print(
+                f"NO Price: "
+                f"{market['no_price']:.3f}"
             )
 
             print(
@@ -659,7 +623,7 @@ def main():
             )
 
             # =====================================
-            # LOG MARKET
+            # LOG ALL MARKET DATA
             # =====================================
 
             log_market(
@@ -671,7 +635,7 @@ def main():
             )
 
             # =====================================
-            # SIGNAL
+            # FINAL SIGNAL WINDOW
             # =====================================
 
             if (
@@ -689,6 +653,11 @@ def main():
                     f"SIGNAL: {signal}"
                 )
 
+                print(
+                    f"DIVERGENCE: "
+                    f"{divergence:.3f}"
+                )
+
                 print("=" * 60)
 
                 print()
@@ -702,256 +671,11 @@ def main():
                     time_left
                 )
 
-                entry_price = (
-                    market["yes_price"]
-                    if signal == "BUY_YES"
-                    else market["no_price"]
-                )
-
-                open_signals.append({
-
-                    "market_slug":
-                        market["slug"],
-
-                    "signal":
-                        signal,
-
-                    "entry_price":
-                        entry_price,
-
-                    "start_price":
-                        market[
-                            "price_to_beat"
-                        ],
-
-                    "divergence":
-                        divergence,
-
-                    "momentum_pct":
-                        momentum[
-                            "momentum_pct"
-                        ]
-
-                })
-
             else:
 
                 print(
-                    f"Skip: {result}"
+                    f"Skip: {status}"
                 )
-
-            # =====================================
-            # RESOLVE USING NEXT PM EVENT
-            # =====================================
-
-            remaining_signals = []
-
-            current_market_slug = (
-                get_market_slug()
-            )
-
-            current_market = (
-                fetch_market()
-            )
-
-            for s in open_signals:
-
-                current_slug = (
-                    s["market_slug"]
-                )
-
-                current_ts = int(
-                    current_slug
-                    .split("-")[-1]
-                )
-
-                next_ts = (
-                    current_ts + 300
-                )
-
-                next_slug = (
-                    f"btc-updown-5m-{next_ts}"
-                )
-
-                # =================================
-                # WAIT FOR NEXT MARKET
-                # =================================
-
-                if (
-                    current_market_slug
-                    != next_slug
-                ):
-
-                    remaining_signals.append(
-                        s
-                    )
-
-                    continue
-
-                try:
-
-                    if not current_market:
-
-                        remaining_signals.append(
-                            s
-                        )
-
-                        continue
-
-                    end_price = (
-                        current_market[
-                            "price_to_beat"
-                        ]
-                    )
-
-                    if (
-                        end_price is None
-                        or
-                        s["start_price"]
-                        is None
-                    ):
-
-                        remaining_signals.append(
-                            s
-                        )
-
-                        continue
-
-                    # =================================
-                    # TRUE PM-NATIVE RESOLUTION
-                    # =================================
-
-                    winner = (
-                        "YES"
-                        if end_price
-                        >= s["start_price"]
-                        else "NO"
-                    )
-
-                    # =================================
-                    # WIN / LOSS
-                    # =================================
-
-                    if (
-                        s["signal"]
-                        == "BUY_YES"
-                    ):
-
-                        won = (
-                            winner == "YES"
-                        )
-
-                    else:
-
-                        won = (
-                            winner == "NO"
-                        )
-
-                    if won:
-
-                        pnl = (
-                            (
-                                1
-                                - s["entry_price"]
-                            )
-                            * (
-                                1 - FEE_RATE
-                            )
-                        )
-
-                        result = "WIN"
-
-                    else:
-
-                        pnl = (
-                            -s["entry_price"]
-                        )
-
-                        result = "LOSS"
-
-                    print()
-
-                    print("=" * 60)
-
-                    print(
-                        f"RESOLVED: "
-                        f"{s['signal']} "
-                        f"→ {result}"
-                    )
-
-                    print(
-                        f"Start Price: "
-                        f"{s['start_price']}"
-                    )
-
-                    print(
-                        f"End Price: "
-                        f"{end_price}"
-                    )
-
-                    print(
-                        f"Winner: "
-                        f"{winner}"
-                    )
-
-                    print(
-                        f"PnL: "
-                        f"{pnl:.4f}"
-                    )
-
-                    print("=" * 60)
-
-                    # =================================
-                    # SAVE
-                    # =================================
-
-                    with open(
-                        RESOLVED_CSV,
-                        "a",
-                        newline=""
-                    ) as f:
-
-                        writer = csv.writer(f)
-
-                        writer.writerow([
-
-                            datetime.utcnow()
-                            .isoformat(),
-
-                            s["market_slug"],
-
-                            s["signal"],
-
-                            s["entry_price"],
-
-                            s["start_price"],
-
-                            end_price,
-
-                            winner,
-
-                            result,
-
-                            round(
-                                pnl,
-                                4
-                            ),
-
-                            s["divergence"],
-
-                            s["momentum_pct"]
-
-                        ])
-
-                except Exception as e:
-
-                    print(
-                        f"Resolve error: {e}"
-                    )
-
-            open_signals = (
-                remaining_signals
-            )
 
             print("-" * 60)
 
@@ -968,7 +692,7 @@ def main():
         except Exception as e:
 
             print(
-                f"Error: {e}"
+                f"Main loop error: {e}"
             )
 
             time.sleep(5)
