@@ -88,7 +88,16 @@ def on_message(
         topic = data.get("topic")
 
         # =============================================
-        # ONLY CHAINLINK BTC STREAM
+        # DEBUG
+        # =============================================
+
+        print()
+
+        print("RAW MESSAGE:")
+        print(data)
+
+        # =============================================
+        # ONLY CHAINLINK STREAM
         # =============================================
 
         if (
@@ -129,7 +138,7 @@ def on_message(
             return
 
         # =============================================
-        # CONVERT 18-DECIMAL FIXED POINT
+        # CONVERT 18 DECIMAL
         # =============================================
 
         btc_price = (
@@ -157,10 +166,6 @@ def on_message(
 
         print("=" * 60)
 
-        # =============================================
-        # SAVE
-        # =============================================
-
         save_price(
             oracle_ts,
             btc_price
@@ -173,7 +178,7 @@ def on_message(
         )
 
 # =====================================================
-# ERROR HANDLER
+# ERROR
 # =====================================================
 
 def on_error(
@@ -192,7 +197,7 @@ def on_error(
     print("=" * 60)
 
 # =====================================================
-# CLOSE HANDLER
+# CLOSE
 # =====================================================
 
 def on_close(
@@ -212,7 +217,7 @@ def on_close(
     print("=" * 60)
 
 # =====================================================
-# OPEN HANDLER
+# OPEN
 # =====================================================
 
 def on_open(ws):
@@ -229,16 +234,21 @@ def on_open(ws):
     print("=" * 60)
 
     # =============================================
-    # SUBSCRIBE TO CHAINLINK BTC STREAM
+    # CORRECT PM SUBSCRIPTION FORMAT
     # =============================================
 
     subscribe_msg = {
 
-        "type":
-            "subscribe",
+        "action": "subscribe",
 
-        "topic":
-            "crypto_prices_chainlink"
+        "subscriptions": [
+
+            {
+                "topic":
+                    "crypto_prices_chainlink"
+            }
+
+        ]
 
     }
 
@@ -257,8 +267,6 @@ def on_open(ws):
     print(
         "crypto_prices_chainlink"
     )
-
-    print()
 
 # =====================================================
 # MAIN
