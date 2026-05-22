@@ -1,7 +1,8 @@
-# btc_5m_candle_logger.py
+# btc_5m_sqlite_logger.py
 
 import websocket
 import json
+import sqlite3
 from datetime import datetime
 
 # ============================================================
@@ -11,6 +12,42 @@ from datetime import datetime
 WS_URL = "wss://ws-live-data.polymarket.com"
 
 TARGET_SYMBOL = "btc/usd"
+
+DB_NAME = "btc_bot.db"
+
+# ============================================================
+# SQLITE SETUP
+# ============================================================
+
+conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+
+cursor = conn.cursor()
+
+# ============================================================
+# CREATE TABLE
+# ============================================================
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS candles_5m (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    candle_time TEXT,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+
+    direction TEXT,
+
+    range_value REAL,
+    body_size REAL,
+
+    created_at TEXT
+)
+""")
+
+conn.commit()
 
 # ============================================================
 # GLOBALS
@@ -24,9 +61,6 @@ current_bucket = None
 # ============================================================
 
 def get_5m_bucket(dt):
-    """
-    Convert timestamp into 5-minute candle bucket
-    """
 
     minute = (dt.minute // 5) * 5
 
@@ -37,13 +71,82 @@ def get_5m_bucket(dt):
     )
 
 # ============================================================
+# SAVE CANDLE
+# ============================================================
+
+def save_candle(bucket, candle):
+
+    direction = "UP"
+
+    if candle["close"] < candle["open"]:
+        direction = "DOWN"
+
+    elif candle["close"] == candle["open"]:
+        direction = "FLAT"
+
+    range_value = candle["high"] - candle["low"]
+
+    body_size = abs(
+        candle["close"] - candle["open"]
+    )
+
+    cursor.execute("""
+    INSERT INTO candles_5m (
+
+        candle_time,
+        open,
+        high,
+        low,
+        close,
+
+        direction,
+
+        range_value,
+        body_size,
+
+        created_at
+
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+
+        str(bucket),
+
+        candle["open"],
+        candle["high"],
+        candle["low"],
+        candle["close"],
+
+        direction,
+
+        range_value,
+        body_size,
+
+        datetime.utcnow().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    ))
+
+    conn.commit()
+
+    print("\n================================================")
+    print("5M CANDLE SAVED TO SQLITE")
+    print("================================================")
+
+    print("TIME      :", bucket)
+    print("OPEN      :", round(candle["open"], 2))
+    print("HIGH      :", round(candle["high"], 2))
+    print("LOW       :", round(candle["low"], 2))
+    print("CLOSE     :", round(candle["close"], 2))
+    print("DIRECTION :", direction)
+
+# ============================================================
 # OPEN
 # ============================================================
 
 def on_open(ws):
 
     print("================================================")
-    print("CONNECTED TO POLYMARKET RTDS")
+    print("BTC SQLITE LOGGER STARTED")
     print("================================================")
 
     subscribe_msg = {
@@ -59,7 +162,7 @@ def on_open(ws):
 
     ws.send(json.dumps(subscribe_msg))
 
-    print("\nSubscribed to BTC Chainlink feed")
+    print("\nSubscribed to BTC feed")
 
 # ============================================================
 # MESSAGE
@@ -71,7 +174,7 @@ def on_message(ws, message):
     global current_bucket
 
     # ========================================================
-    # JSON SAFETY
+    # SAFE JSON PARSE
     # ========================================================
 
     try:
@@ -81,19 +184,8 @@ def on_message(ws, message):
 
         data = json.loads(message)
 
-    except json.JSONDecodeError:
-        print("\nNON JSON MESSAGE:")
-        print(message)
+    except:
         return
-
-    except Exception as e:
-        print("\nJSON ERROR:")
-        print(e)
-        return
-
-    # ========================================================
-    # PROCESS DATA
-    # ========================================================
 
     try:
 
@@ -103,48 +195,44 @@ def on_message(ws, message):
 
         payload = data.get("payload", {})
 
-        symbol = payload.get("symbol", "").lower()
+        symbol = payload.get(
+            "symbol",
+            ""
+        ).lower()
 
         # only BTC
         if symbol != TARGET_SYMBOL:
             return
 
-        price = float(payload.get("value"))
+        price = float(
+            payload.get("value")
+        )
 
-        timestamp = payload.get("timestamp")
+        timestamp = payload.get(
+            "timestamp"
+        )
 
-        dt = datetime.utcfromtimestamp(timestamp / 1000)
+        dt = datetime.utcfromtimestamp(
+            timestamp / 1000
+        )
 
         bucket = get_5m_bucket(dt)
 
         # ====================================================
-        # NEW CANDLE START
+        # NEW CANDLE
         # ====================================================
 
         if current_bucket != bucket:
 
-            # print previous candle
+            # save previous candle
             if current_candle is not None:
 
-                direction = "UP"
+                save_candle(
+                    current_bucket,
+                    current_candle
+                )
 
-                if current_candle["close"] < current_candle["open"]:
-                    direction = "DOWN"
-
-                elif current_candle["close"] == current_candle["open"]:
-                    direction = "FLAT"
-
-                print("\n================================================")
-                print("5 MIN CANDLE CLOSED")
-                print("================================================")
-                print("TIME  :", current_bucket)
-                print("OPEN  :", round(current_candle["open"], 2))
-                print("HIGH  :", round(current_candle["high"], 2))
-                print("LOW   :", round(current_candle["low"], 2))
-                print("CLOSE :", round(current_candle["close"], 2))
-                print("MOVE  :", direction)
-
-            # create new candle
+            # start new candle
             current_bucket = bucket
 
             current_candle = {
@@ -155,13 +243,13 @@ def on_message(ws, message):
             }
 
             print("\n------------------------------------------------")
-            print("NEW 5M CANDLE STARTED")
+            print("NEW 5M CANDLE")
             print("------------------------------------------------")
             print("TIME :", current_bucket)
             print("OPEN :", round(price, 2))
 
         # ====================================================
-        # UPDATE CANDLE
+        # UPDATE CURRENT CANDLE
         # ====================================================
 
         current_candle["high"] = max(
@@ -187,8 +275,8 @@ def on_message(ws, message):
         )
 
     except Exception as e:
-        print("\nPROCESSING ERROR:")
-        print(e)
+
+        print("PROCESSING ERROR:", e)
 
 # ============================================================
 # ERROR
@@ -205,22 +293,13 @@ def on_error(ws, error):
 
 def on_close(ws, close_status_code, close_msg):
 
-    print("\n================================================")
-    print("WEBSOCKET CLOSED")
-    print("================================================")
-
-    print(close_status_code)
-    print(close_msg)
+    print("\nWEBSOCKET CLOSED")
 
 # ============================================================
 # MAIN
 # ============================================================
 
 if __name__ == "__main__":
-
-    print("================================================")
-    print("BTC 5M CANDLE LOGGER")
-    print("================================================")
 
     ws = websocket.WebSocketApp(
         WS_URL,
