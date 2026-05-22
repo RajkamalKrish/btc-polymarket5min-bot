@@ -1,4 +1,4 @@
-# btc_5m_logger.py
+# btc_5m_candle_logger.py
 
 import websocket
 import json
@@ -6,11 +6,22 @@ from datetime import datetime
 
 WS_URL = "wss://ws-live-data.polymarket.com"
 
+TARGET_SYMBOL = "btc/usd"
+
 # ============================================================
-# SETTINGS
+# CANDLE STORAGE
 # ============================================================
 
-TARGET_SYMBOL = "btc/usd"
+current_candle = None
+current_bucket = None
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def get_5m_bucket(dt):
+    minute = (dt.minute // 5) * 5
+    return dt.replace(minute=minute, second=0, microsecond=0)
 
 # ============================================================
 # OPEN
@@ -18,9 +29,7 @@ TARGET_SYMBOL = "btc/usd"
 
 def on_open(ws):
 
-    print("================================================")
-    print("CONNECTED TO POLYMARKET RTDS")
-    print("================================================")
+    print("CONNECTED")
 
     subscribe_msg = {
         "action": "subscribe",
@@ -35,13 +44,14 @@ def on_open(ws):
 
     ws.send(json.dumps(subscribe_msg))
 
-    print("\nSubscribed to BTC Chainlink feed")
-
 # ============================================================
 # MESSAGE
 # ============================================================
 
 def on_message(ws, message):
+
+    global current_candle
+    global current_bucket
 
     try:
 
@@ -54,26 +64,66 @@ def on_message(ws, message):
 
         symbol = payload.get("symbol", "").lower()
 
-        # ====================================================
-        # ONLY BTC
-        # ====================================================
-
         if symbol != TARGET_SYMBOL:
             return
 
-        price = payload.get("value")
+        price = float(payload.get("value"))
+
         timestamp = payload.get("timestamp")
 
-        readable_time = datetime.utcfromtimestamp(
-            timestamp / 1000
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        dt = datetime.utcfromtimestamp(timestamp / 1000)
 
-        print("\n================================================")
-        print("BTC LIVE PRICE")
-        print("================================================")
-        print("TIME   :", readable_time)
-        print("SYMBOL :", symbol)
-        print("PRICE  :", price)
+        bucket = get_5m_bucket(dt)
+
+        # ====================================================
+        # NEW CANDLE
+        # ====================================================
+
+        if current_bucket != bucket:
+
+            # print previous candle
+            if current_candle:
+
+                direction = "UP"
+
+                if current_candle["close"] < current_candle["open"]:
+                    direction = "DOWN"
+
+                print("\n================================================")
+                print("5 MIN CANDLE CLOSED")
+                print("================================================")
+                print("TIME  :", current_bucket)
+                print("OPEN  :", round(current_candle["open"], 2))
+                print("HIGH  :", round(current_candle["high"], 2))
+                print("LOW   :", round(current_candle["low"], 2))
+                print("CLOSE :", round(current_candle["close"], 2))
+                print("MOVE  :", direction)
+
+            # start new candle
+            current_bucket = bucket
+
+            current_candle = {
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price
+            }
+
+        # ====================================================
+        # UPDATE CANDLE
+        # ====================================================
+
+        current_candle["high"] = max(
+            current_candle["high"],
+            price
+        )
+
+        current_candle["low"] = min(
+            current_candle["low"],
+            price
+        )
+
+        current_candle["close"] = price
 
     except Exception as e:
         print("ERROR:", e)
@@ -83,17 +133,14 @@ def on_message(ws, message):
 # ============================================================
 
 def on_error(ws, error):
-    print("\nERROR:")
-    print(error)
+    print("ERROR:", error)
 
 # ============================================================
 # CLOSE
 # ============================================================
 
 def on_close(ws, close_status_code, close_msg):
-    print("\nCLOSED")
-    print(close_status_code)
-    print(close_msg)
+    print("CLOSED")
 
 # ============================================================
 # MAIN
