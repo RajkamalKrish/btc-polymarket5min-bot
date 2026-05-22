@@ -4,12 +4,16 @@ import websocket
 import json
 from datetime import datetime
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 WS_URL = "wss://ws-live-data.polymarket.com"
 
 TARGET_SYMBOL = "btc/usd"
 
 # ============================================================
-# CANDLE STORAGE
+# GLOBALS
 # ============================================================
 
 current_candle = None
@@ -20,8 +24,17 @@ current_bucket = None
 # ============================================================
 
 def get_5m_bucket(dt):
+    """
+    Convert timestamp into 5-minute candle bucket
+    """
+
     minute = (dt.minute // 5) * 5
-    return dt.replace(minute=minute, second=0, microsecond=0)
+
+    return dt.replace(
+        minute=minute,
+        second=0,
+        microsecond=0
+    )
 
 # ============================================================
 # OPEN
@@ -29,7 +42,9 @@ def get_5m_bucket(dt):
 
 def on_open(ws):
 
-    print("CONNECTED")
+    print("================================================")
+    print("CONNECTED TO POLYMARKET RTDS")
+    print("================================================")
 
     subscribe_msg = {
         "action": "subscribe",
@@ -44,6 +59,8 @@ def on_open(ws):
 
     ws.send(json.dumps(subscribe_msg))
 
+    print("\nSubscribed to BTC Chainlink feed")
+
 # ============================================================
 # MESSAGE
 # ============================================================
@@ -53,10 +70,34 @@ def on_message(ws, message):
     global current_candle
     global current_bucket
 
+    # ========================================================
+    # JSON SAFETY
+    # ========================================================
+
     try:
+
+        if not message:
+            return
 
         data = json.loads(message)
 
+    except json.JSONDecodeError:
+        print("\nNON JSON MESSAGE:")
+        print(message)
+        return
+
+    except Exception as e:
+        print("\nJSON ERROR:")
+        print(e)
+        return
+
+    # ========================================================
+    # PROCESS DATA
+    # ========================================================
+
+    try:
+
+        # only chainlink feed
         if data.get("topic") != "crypto_prices_chainlink":
             return
 
@@ -64,6 +105,7 @@ def on_message(ws, message):
 
         symbol = payload.get("symbol", "").lower()
 
+        # only BTC
         if symbol != TARGET_SYMBOL:
             return
 
@@ -76,18 +118,21 @@ def on_message(ws, message):
         bucket = get_5m_bucket(dt)
 
         # ====================================================
-        # NEW CANDLE
+        # NEW CANDLE START
         # ====================================================
 
         if current_bucket != bucket:
 
             # print previous candle
-            if current_candle:
+            if current_candle is not None:
 
                 direction = "UP"
 
                 if current_candle["close"] < current_candle["open"]:
                     direction = "DOWN"
+
+                elif current_candle["close"] == current_candle["open"]:
+                    direction = "FLAT"
 
                 print("\n================================================")
                 print("5 MIN CANDLE CLOSED")
@@ -99,7 +144,7 @@ def on_message(ws, message):
                 print("CLOSE :", round(current_candle["close"], 2))
                 print("MOVE  :", direction)
 
-            # start new candle
+            # create new candle
             current_bucket = bucket
 
             current_candle = {
@@ -108,6 +153,12 @@ def on_message(ws, message):
                 "low": price,
                 "close": price
             }
+
+            print("\n------------------------------------------------")
+            print("NEW 5M CANDLE STARTED")
+            print("------------------------------------------------")
+            print("TIME :", current_bucket)
+            print("OPEN :", round(price, 2))
 
         # ====================================================
         # UPDATE CANDLE
@@ -125,33 +176,58 @@ def on_message(ws, message):
 
         current_candle["close"] = price
 
+        # ====================================================
+        # LIVE PRICE
+        # ====================================================
+
+        print(
+            f"LIVE BTC | "
+            f"{dt.strftime('%H:%M:%S')} | "
+            f"{round(price, 2)}"
+        )
+
     except Exception as e:
-        print("ERROR:", e)
+        print("\nPROCESSING ERROR:")
+        print(e)
 
 # ============================================================
 # ERROR
 # ============================================================
 
 def on_error(ws, error):
-    print("ERROR:", error)
+
+    print("\nWEBSOCKET ERROR")
+    print(error)
 
 # ============================================================
 # CLOSE
 # ============================================================
 
 def on_close(ws, close_status_code, close_msg):
-    print("CLOSED")
+
+    print("\n================================================")
+    print("WEBSOCKET CLOSED")
+    print("================================================")
+
+    print(close_status_code)
+    print(close_msg)
 
 # ============================================================
 # MAIN
 # ============================================================
 
-ws = websocket.WebSocketApp(
-    WS_URL,
-    on_open=on_open,
-    on_message=on_message,
-    on_error=on_error,
-    on_close=on_close
-)
+if __name__ == "__main__":
 
-ws.run_forever()
+    print("================================================")
+    print("BTC 5M CANDLE LOGGER")
+    print("================================================")
+
+    ws = websocket.WebSocketApp(
+        WS_URL,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+
+    ws.run_forever()
