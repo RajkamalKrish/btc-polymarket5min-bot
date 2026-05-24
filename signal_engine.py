@@ -89,6 +89,43 @@ elif (
     confidence = 0.62
 
 # ============================================================
+# STORE PREDICTION
+# ============================================================
+
+prediction_time = datetime.utcnow().strftime(
+    "%Y-%m-%d %H:%M:%S"
+)
+
+cursor = conn.cursor()
+
+cursor.execute("""
+
+INSERT INTO predictions (
+
+    prediction_time,
+    candle_time,
+    signal,
+    confidence,
+    created_at
+
+) VALUES (?, ?, ?, ?, ?)
+
+""", (
+
+    prediction_time,
+
+    latest["candle_time"],
+
+    signal,
+
+    confidence,
+
+    prediction_time
+))
+
+conn.commit()
+
+# ============================================================
 # OUTPUT
 # ============================================================
 
@@ -111,3 +148,5 @@ print("EMA21      :", round(latest["ema21"], 2))
 print("SIGNAL     :", signal)
 
 print("CONFIDENCE :", confidence)
+
+print("\nPrediction stored.")
