@@ -1,3 +1,5 @@
+# prediction_tracker.py
+
 import sqlite3
 import time
 
@@ -7,17 +9,24 @@ import time
 
 DB_NAME = "btc_bot.db"
 
-conn = sqlite3.connect(DB_NAME)
+conn = sqlite3.connect(
+    DB_NAME,
+    check_same_thread=False
+)
 
 cursor = conn.cursor()
 
 # ============================================================
-# MAIN LOOP
+# START
 # ============================================================
 
 print("\n================================================")
 print("BTC PREDICTION TRACKER")
 print("================================================")
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
 
 while True:
 
@@ -66,11 +75,32 @@ while True:
 
         WHERE actual_result IS NULL
 
+        ORDER BY id ASC
+
         """)
 
         predictions = cursor.fetchall()
 
+        # ====================================================
+        # NO PENDING PREDICTIONS
+        # ====================================================
+
+        if not predictions:
+
+            print(
+                "Tracker running... "
+                "No pending predictions."
+            )
+
+            time.sleep(15)
+
+            continue
+
         updated = False
+
+        # ====================================================
+        # PROCESS PREDICTIONS
+        # ====================================================
 
         for prediction in predictions:
 
@@ -81,53 +111,72 @@ while True:
             prediction_candle_time = prediction[2]
 
             # ================================================
-            # MATCH CANDLE
+            # WAIT FOR TARGET CANDLE TO CLOSE
             # ================================================
 
-            if prediction_candle_time == latest_candle_time:
+            if prediction_candle_time != latest_candle_time:
 
-                outcome = "LOSS"
+                print(
+                    f"Waiting for candle close: "
+                    f"{prediction_candle_time}"
+                )
 
-                if prediction_signal == actual_result:
+                continue
 
-                    outcome = "WIN"
+            # ================================================
+            # CALCULATE RESULT
+            # ================================================
 
-                # ============================================
-                # UPDATE RESULT
-                # ============================================
+            outcome = "LOSS"
 
-                cursor.execute("""
+            if prediction_signal == actual_result:
 
-                UPDATE predictions
+                outcome = "WIN"
 
-                SET
-                    actual_result = ?,
-                    outcome = ?
+            # ================================================
+            # UPDATE DATABASE
+            # ================================================
 
-                WHERE id = ?
+            cursor.execute("""
 
-                """, (
+            UPDATE predictions
 
-                    actual_result,
-                    outcome,
-                    prediction_id
-                ))
+            SET
+                actual_result = ?,
+                outcome = ?
 
-                conn.commit()
+            WHERE id = ?
 
-                updated = True
+            """, (
 
-                print("\n================================================")
-                print("PREDICTION UPDATED")
-                print("================================================")
+                actual_result,
+                outcome,
+                prediction_id
+            ))
 
-                print("CANDLE TIME :", latest_candle_time)
+            conn.commit()
 
-                print("PREDICTION  :", prediction_signal)
+            updated = True
 
-                print("ACTUAL      :", actual_result)
+            # ================================================
+            # OUTPUT
+            # ================================================
 
-                print("OUTCOME     :", outcome)
+            print("\n================================================")
+            print("PREDICTION UPDATED")
+            print("================================================")
+
+            print("CANDLE TIME :", latest_candle_time)
+
+            print("PREDICTION  :", prediction_signal)
+
+            print("ACTUAL      :", actual_result)
+
+            print("OUTCOME     :", outcome)
+
+        # ====================================================
+        # NO UPDATES
+        # ====================================================
 
         if not updated:
 
