@@ -1,5 +1,3 @@
-# prediction_tracker.py
-
 import sqlite3
 import time
 
@@ -37,14 +35,12 @@ while True:
         # ====================================================
 
         cursor.execute("""
-
         SELECT
             candle_time,
             direction
         FROM candles_5m
         ORDER BY id DESC
         LIMIT 1
-
         """)
 
         latest_candle = cursor.fetchone()
@@ -66,24 +62,16 @@ while True:
         # ====================================================
 
         cursor.execute("""
-
         SELECT
             id,
             signal,
             candle_time
         FROM predictions
-
         WHERE actual_result IS NULL
-
         ORDER BY id ASC
-
         """)
 
         predictions = cursor.fetchall()
-
-        # ====================================================
-        # NO PENDING PREDICTIONS
-        # ====================================================
 
         if not predictions:
 
@@ -124,6 +112,36 @@ while True:
                 continue
 
             # ================================================
+            # HANDLE SKIP SIGNALS
+            # ================================================
+
+            if prediction_signal == "SKIP":
+
+                cursor.execute("""
+                UPDATE predictions
+                SET
+                    actual_result = ?,
+                    outcome = 'SKIPPED'
+                WHERE id = ?
+                """, (
+                    actual_result,
+                    prediction_id
+                ))
+
+                conn.commit()
+
+                updated = True
+
+                print("\n================================================")
+                print("SKIP RECORDED")
+                print("================================================")
+                print("CANDLE TIME :", latest_candle_time)
+                print("ACTUAL      :", actual_result)
+                print("OUTCOME     : SKIPPED")
+
+                continue
+
+            # ================================================
             # CALCULATE RESULT
             # ================================================
 
@@ -138,17 +156,12 @@ while True:
             # ================================================
 
             cursor.execute("""
-
             UPDATE predictions
-
             SET
                 actual_result = ?,
                 outcome = ?
-
             WHERE id = ?
-
             """, (
-
                 actual_result,
                 outcome,
                 prediction_id
@@ -158,20 +171,12 @@ while True:
 
             updated = True
 
-            # ================================================
-            # OUTPUT
-            # ================================================
-
             print("\n================================================")
             print("PREDICTION UPDATED")
             print("================================================")
-
             print("CANDLE TIME :", latest_candle_time)
-
             print("PREDICTION  :", prediction_signal)
-
             print("ACTUAL      :", actual_result)
-
             print("OUTCOME     :", outcome)
 
         # ====================================================
@@ -184,10 +189,6 @@ while True:
                 "Tracker running... "
                 "No completed predictions yet."
             )
-
-        # ====================================================
-        # WAIT
-        # ====================================================
 
         time.sleep(15)
 
