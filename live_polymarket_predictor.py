@@ -1,4 +1,4 @@
-\# live_polymarket_predictor.py
+# live_polymarket_predictor.py
 
 import sqlite3
 import pandas as pd
