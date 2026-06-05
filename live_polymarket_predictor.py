@@ -1,6 +1,3 @@
-# live_polymarket_predictor.py
-
-```python
 import sqlite3
 import pandas as pd
 import time
@@ -13,17 +10,9 @@ from indicators import (
     calculate_ema
 )
 
-# ============================================================
-# DATABASE
-# ============================================================
-
 DB_NAME = "btc_bot.db"
 
 conn = sqlite3.connect(DB_NAME)
-
-# ============================================================
-# WAIT UNTIL NEXT 5M WINDOW
-# ============================================================
 
 def seconds_until_next_5m():
 
@@ -48,13 +37,8 @@ def seconds_until_next_5m():
             microsecond=0
         )
 
-    delta = next_time - now
+    return (next_time - now).total_seconds()
 
-    return delta.total_seconds()
-
-# ============================================================
-# GET NEXT CANDLE TIME
-# ============================================================
 
 def get_next_candle_time():
 
@@ -79,51 +63,28 @@ def get_next_candle_time():
             microsecond=0
         )
 
-    return next_time.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    return next_time.strftime("%Y-%m-%d %H:%M:%S")
 
-# ============================================================
-# GENERATE SIGNAL
-# ============================================================
 
 def generate_signal():
 
-    query = """
-    SELECT *
-    FROM candles_5m
-    ORDER BY id ASC
-    """
-
-    df = pd.read_sql(query, conn)
+    df = pd.read_sql(
+        "SELECT * FROM candles_5m ORDER BY id ASC",
+        conn
+    )
 
     if len(df) < 30:
-
-        print("Not enough candles yet.")
-
         return
 
-    # ========================================================
-    # INDICATORS
-    # ========================================================
-
     df["rsi"] = calculate_rsi(df)
-
     df["atr"] = calculate_atr(df)
-
     df["ema9"] = calculate_ema(df, 9)
-
     df["ema21"] = calculate_ema(df, 21)
 
     latest = df.iloc[-1]
 
     signal = "SKIP"
-
     confidence = 0.50
-
-    # ========================================================
-    # SIGNAL LOGIC
-    # ========================================================
 
     if (
         latest["close"] > latest["ema9"]
@@ -131,9 +92,7 @@ def generate_signal():
         and latest["rsi"] > 55
         and latest["atr"] > 20
     ):
-
         signal = "UP"
-
         confidence = 0.62
 
     elif (
@@ -142,16 +101,8 @@ def generate_signal():
         and latest["rsi"] < 45
         and latest["atr"] > 20
     ):
-
         signal = "DOWN"
-
         confidence = 0.62
-
-    # ========================================================
-    # TARGET NEXT CANDLE
-    # ========================================================
-
-    next_candle_time = get_next_candle_time()
 
     prediction_time = datetime.utcnow().strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -159,111 +110,64 @@ def generate_signal():
 
     cursor = conn.cursor()
 
-    cursor.execute("""
-
-    INSERT INTO predictions (
-
-        prediction_time,
-        candle_time,
-        signal,
-        confidence,
-
-        rsi,
-        atr,
-        ema9,
-        ema21,
-
-        created_at
-
+    cursor.execute(
+        """
+        INSERT INTO predictions
+        (
+            prediction_time,
+            candle_time,
+            signal,
+            confidence,
+            rsi,
+            atr,
+            ema9,
+            ema21,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            prediction_time,
+            get_next_candle_time(),
+            signal,
+            confidence,
+            float(latest["rsi"]),
+            float(latest["atr"]),
+            float(latest["ema9"]),
+            float(latest["ema21"]),
+            prediction_time
+        )
     )
-
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-    """, (
-
-        prediction_time,
-
-        next_candle_time,
-
-        signal,
-
-        confidence,
-
-        float(latest["rsi"]),
-        float(latest["atr"]),
-        float(latest["ema9"]),
-        float(latest["ema21"]),
-
-        prediction_time
-
-    ))
 
     conn.commit()
 
-    # ========================================================
-    # OUTPUT
-    # ========================================================
+    print(
+        prediction_time,
+        signal,
+        round(float(latest["rsi"]), 2)
+    )
 
-    print("\n================================================")
-    print("LIVE POLYMARKET PREDICTION")
-    print("================================================")
 
-    print("PREDICTION TIME :", prediction_time)
-
-    print("TARGET CANDLE   :", next_candle_time)
-
-    print("SIGNAL          :", signal)
-
-    print("CONFIDENCE      :", confidence)
-
-    print("RSI             :", round(float(latest["rsi"]), 2))
-
-    print("ATR             :", round(float(latest["atr"]), 2))
-
-    print("EMA9            :", round(float(latest["ema9"]), 2))
-
-    print("EMA21           :", round(float(latest["ema21"]), 2))
-
-# ============================================================
-# MAIN LOOP
-# ============================================================
-
-print("\n================================================")
 print("LIVE POLYMARKET PREDICTOR")
-print("================================================")
 
 while True:
 
     try:
 
-        now = datetime.utcnow()
-
         seconds = seconds_until_next_5m()
-
-        # ====================================================
-        # RUN 15 SECONDS BEFORE NEXT CANDLE
-        # ====================================================
 
         if 10 <= seconds <= 15:
 
             generate_signal()
 
-            # avoid duplicate prediction
             time.sleep(20)
 
         else:
-
-            print(
-                f"UTC TIME: {now.strftime('%H:%M:%S')} | "
-                f"SECONDS TO NEXT 5M: {round(seconds)}",
-                end="\r"
-            )
 
             time.sleep(1)
 
     except Exception as e:
 
-        print("\nERROR:", e)
+        print("ERROR:", e)
 
         time.sleep(5)
-```
