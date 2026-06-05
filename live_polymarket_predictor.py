@@ -1,10 +1,11 @@
+```python
 # live_polymarket_predictor.py
 
 import sqlite3
 import pandas as pd
 import time
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from indicators import (
     calculate_rsi,
@@ -18,7 +19,10 @@ from indicators import (
 
 DB_NAME = "btc_bot.db"
 
-conn = sqlite3.connect(DB_NAME)
+conn = sqlite3.connect(
+    DB_NAME,
+    check_same_thread=False
+)
 
 # ============================================================
 # WAIT UNTIL NEXT 5M WINDOW
@@ -47,9 +51,7 @@ def seconds_until_next_5m():
             microsecond=0
         )
 
-    delta = next_time - now
-
-    return delta.total_seconds()
+    return (next_time - now).total_seconds()
 
 # ============================================================
 # GET NEXT CANDLE TIME
@@ -116,6 +118,11 @@ def generate_signal():
 
     latest = df.iloc[-1]
 
+    rsi = float(latest["rsi"])
+    atr = float(latest["atr"])
+    ema9 = float(latest["ema9"])
+    ema21 = float(latest["ema21"])
+
     signal = "SKIP"
 
     confidence = 0.50
@@ -125,10 +132,10 @@ def generate_signal():
     # ========================================================
 
     if (
-        latest["close"] > latest["ema9"]
-        and latest["ema9"] > latest["ema21"]
-        and latest["rsi"] > 55
-        and latest["atr"] > 20
+        latest["close"] > ema9
+        and ema9 > ema21
+        and rsi > 55
+        and atr > 20
     ):
 
         signal = "UP"
@@ -136,10 +143,10 @@ def generate_signal():
         confidence = 0.62
 
     elif (
-        latest["close"] < latest["ema9"]
-        and latest["ema9"] < latest["ema21"]
-        and latest["rsi"] < 45
-        and latest["atr"] > 20
+        latest["close"] < ema9
+        and ema9 < ema21
+        and rsi < 45
+        and atr > 20
     ):
 
         signal = "DOWN"
@@ -166,9 +173,17 @@ def generate_signal():
         candle_time,
         signal,
         confidence,
+
+        rsi,
+        atr,
+        ema9,
+        ema21,
+
         created_at
 
-    ) VALUES (?, ?, ?, ?, ?)
+    )
+
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 
     """, (
 
@@ -180,7 +195,13 @@ def generate_signal():
 
         confidence,
 
+        rsi,
+        atr,
+        ema9,
+        ema21,
+
         prediction_time
+
     ))
 
     conn.commit()
@@ -201,13 +222,13 @@ def generate_signal():
 
     print("CONFIDENCE      :", confidence)
 
-    print("RSI             :", round(latest["rsi"], 2))
+    print("RSI             :", round(rsi, 2))
 
-    print("ATR             :", round(latest["atr"], 2))
+    print("ATR             :", round(atr, 2))
 
-    print("EMA9            :", round(latest["ema9"], 2))
+    print("EMA9            :", round(ema9, 2))
 
-    print("EMA21           :", round(latest["ema21"], 2))
+    print("EMA21           :", round(ema21, 2))
 
 # ============================================================
 # MAIN LOOP
@@ -226,7 +247,7 @@ while True:
         seconds = seconds_until_next_5m()
 
         # ====================================================
-        # RUN 15 SECONDS BEFORE NEXT CANDLE
+        # RUN 10-15 SECONDS BEFORE NEXT CANDLE
         # ====================================================
 
         if 10 <= seconds <= 15:
@@ -251,3 +272,4 @@ while True:
         print("\nERROR:", e)
 
         time.sleep(5)
+```
